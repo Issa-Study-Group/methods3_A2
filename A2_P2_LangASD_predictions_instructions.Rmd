@@ -145,6 +145,7 @@ summary(anova_one_way)
 model = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = train, REML = FALSE)
 
 
+
 #- calculate performance of the model on the training data: root mean square error is a good measure. (Tip: google the function rmse())
 
 
