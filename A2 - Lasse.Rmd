@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r Loading Data}
-pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret,tidyverse, caret, data.table, merTools, reshape2)
+pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret,tidyverse, caret, data.table, merTools, reshape2, MuMIn)
 ```
 
 ```{r Making test data}
@@ -76,13 +76,17 @@ data <- data[complete.cases(data), ] #Removing complete cases
 
 ```{r Loading model}
 model = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = data, REML = FALSE) # for train data
-model_test = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = test, REML = FALSE) # for train data
-
+model_test = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = test, REML = FALSE) # for test data
 ```
 
 ```{r Calculating the performance of the training and testing data}
 rmse(data$CHI_MLU, predict(model))
 rmse(test$CHI_MLU, predict(model_test))
+```
+
+```{r Calculating marginal and conditional r squared}
+r.squaredGLMM(model)
+r.squaredGLMM(model_test)
 ```
 
 
