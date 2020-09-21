@@ -1,12 +1,12 @@
 ---
-title: "A2 - Lasse Code"
-author: "Lasse Hansen"
+title: "A2 - Part 2, Study Group 7"
+author: "Kristian Severin, Lasse Hansen, Nikolaj Munch & Sarah Nielsen"
 date: "9/18/2020"
 output: html_document
 ---
 
 ```{r Loading Data}
-pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret,tidyverse, caret, data.table, merTools)
+pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret,tidyverse, caret, data.table, merTools, reshape2)
 ```
 
 ```{r Making test data}
@@ -58,8 +58,9 @@ CleanUpData <- function(Demo,LU,Word){
 }
 
 test <- CleanUpData(Demo, LU, Word)
-
 test <- test %>% rename(SUBJ = Child.ID, VISIT = Visit)
+test <- test %>% dplyr::select("SUBJ", "VISIT", "Diagnosis", "tokens_CHI", "types_CHI", "MOT_MLU", "CHI_MLU", "verbalIQ1", "nonVerbalIQ1", "Socialization1") #Subsetting the variables our model takes
+test <- test[complete.cases(test), ]
 ```
 
 ```{r Loading train data}
@@ -68,17 +69,42 @@ data <- data %>% rename(SUBJ = Child.ID, VISIT = Visit)
 ```
 
 ```{r Removing complete cases}
-data <- data %>% select("SUBJ", "VISIT", "Diagnosis", "tokens_CHI", "types_CHI", "MOT_MLU", "CHI_MLU", "verbalIQ1", "nonVerbalIQ1", "Socialization1") #Subsetting the variables our model takes
+data <- data %>% dplyr::select("SUBJ", "VISIT", "Diagnosis", "tokens_CHI", "types_CHI", "MOT_MLU", "CHI_MLU", "verbalIQ1", "nonVerbalIQ1", "Socialization1") #Subsetting the variables our model takes
 
-data <- data[complete.cases(data), ]
+data <- data[complete.cases(data), ] #Removing complete cases
 ```
 
-```{r}
-model = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = train, REML = FALSE)
+```{r Loading model}
+model = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = data, REML = FALSE) # for train data
+model_test = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = test, REML = FALSE) # for train data
 
-pi <- predictInterval(model, test)
+```
 
-ggplot(pi, aes(x = 1:57)) +  
+```{r Calculating the performance of the training and testing data}
+rmse(data$CHI_MLU, predict(model))
+rmse(test$CHI_MLU, predict(model_test))
+```
+
+
+```{r Plotting the predicted confidence interval for the test data}
+pi_0 <- predictInterval(model, data)
+
+pi <- predictInterval(model_test, test)
+
+
+
+
+
+ggplot(pi, aes(x = 1:36)) +  
+ geom_line(aes(y = fit), color = "darkred") + 
+ geom_line(aes(y = lwr), color="steelblue", linetype="twodash") + 
+ geom_line(aes(y = upr), color = "cornflowerblue") +
+  labs(x="Index", y="Prediction w/ 95% PI") +
+  theme_bw() +  theme(legend.position="bottom") +
+  scale_color_brewer(type = "qual", palette = 2)
+
+
+ggplot(pi_0, aes(x = 1:352)) +  
  geom_line(aes(y = fit), color = "darkred") + 
  geom_line(aes(y = lwr), color="steelblue", linetype="twodash") + 
  geom_line(aes(y = upr), color = "cornflowerblue") +
@@ -87,19 +113,26 @@ ggplot(pi, aes(x = 1:57)) +
   scale_color_brewer(type = "qual", palette = 2)
 ```
 
-```{r}
+```{r Making cross validated versions of 3 different models}
 k = 6
-folds = createFolds(unique(data$SUBJ), k = k, list = TRUE, returnTrain = FALSE)
+
+folds = createFolds(unique(data$SUBJ), k = k, list = TRUE, returnTrain = FALSE) #Creating the folds for the cross validation
+
 trainRMSE = rep(NA, k)
 testRMSE = rep(NA, k)
+trainRMSE1 = rep(NA, k)
+testRMSE1 = rep(NA, k)
+trainRMSE2 = rep(NA, k)
+testRMSE2 = rep(NA, k)
+
 i = 1
 
 for (fold in folds){
   train = subset(data, !(SUBJ  %in% fold)) 
   test = subset(data, SUBJ %in% fold)
-  model0 = lmer(CHI_MLU~Diagnosis * VISIT^2 + (1 + VISIT | SUBJ), train)
-  model1 = lmer(CHI_MLU~Diagnosis * VISIT^2 + verbalIQ1 + nonVerbalIQ1+(1+VISIT|SUBJ), train)
-  model2 = lmer(CHI_MLU~Diagnosis * VISIT^2+ tokens_CHI + types_CHI + MOT_MLU + (1+VISIT|SUBJ), train)
+  model0 = lmer(CHI_MLU~Diagnosis * VISIT^2 + (1 + VISIT | SUBJ), train, REML = FALSE)
+  model1 = lmer(CHI_MLU~Diagnosis * VISIT^2 + verbalIQ1 + nonVerbalIQ1 + + Socialization1 + MOT_MLU + (1+VISIT|SUBJ), train, REML = FALSE)
+  model2 = lmer(CHI_MLU~Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1+VISIT|SUBJ), train, REML = FALSE)
   test$prediction0 = predict (model0, test, allow.new.levels = TRUE)
   train$prediction0 = fitted(model0)
   test$prediction1 = predict (model1, test, allow.new.levels = TRUE)
@@ -114,6 +147,113 @@ for (fold in folds){
   testRMSE2[i] = rmse(test$CHI_MLU, test$prediction2)
   i = i + 1
 }
+
+rmsedf <- cbind(data.frame(testRMSE), data.frame(trainRMSE), data.frame(testRMSE1), data.frame(trainRMSE1), data.frame(testRMSE2), data.frame(trainRMSE2)) #Making a dataframe of the different vlaues of RMSE for the different models
+
+rmsedf$diffm0 <- rmsedf$testRMSE-rmsedf$trainRMSE #Calculating the difference between the RMSE of the traina nd test data
+rmsedf$diffm1 <- rmsedf$testRMSE1-rmsedf$trainRMSE1
+rmsedf$diffm2 <- rmsedf$testRMSE2-rmsedf$trainRMSE2
+
+```
+
+```{r Making long dataframe for RMSEDF}
+longrmsedf <- melt(rmsedf) #Making the dataframe into long format to be able to plot it
+
+longrmsedf$category <- ifelse(longrmsedf$variable == "testRMSE", "Model 1",
+                   ifelse(longrmsedf$variable == "trainRMSE", "Model 1", 
+                   ifelse(longrmsedf$variable == "diffm0", "Model 1",
+                   ifelse(longrmsedf$variable == "testRMSE1", "Model 2",
+                   ifelse(longrmsedf$variable == "trainRMSE1", "Model 2", 
+                   ifelse(longrmsedf$variable == "diffm1", "Model 2", "Model 3")))))) #Coding the different models for the plot
+
+longrmsedf$variable <- ifelse(longrmsedf$variable == "testRMSE", "Test Model 1",
+                   ifelse(longrmsedf$variable == "trainRMSE", "Train Model 1", 
+                   ifelse(longrmsedf$variable == "diffm0", "Difference Model 1",
+                   ifelse(longrmsedf$variable == "testRMSE1", "Test Model 2",
+                   ifelse(longrmsedf$variable == "trainRMSE1", "Train Model 2", 
+                   ifelse(longrmsedf$variable == "diffm1", "Difference Model 2",
+                   ifelse(longrmsedf$variable == "testRMSE2", "Test Model 3",
+                   ifelse(longrmsedf$variable == "trainRMSE2", "Train Model 3", 
+                   ifelse(longrmsedf$variable == "diffm2", "Difference Model 3", longrmsedf$variable))))))))) 
+                          
+                   
+```
+
+```{r Plotting RMSE for the different models}
+ggplot(longrmsedf, aes(variable, value, colour = category, fill = category)) +
+        geom_bar(stat = 'summary', fun.y = mean, width = 0.2) + 
+        geom_errorbar(stat = 'summary', fun.data = mean_se, width = 0.1, colour = 'black') +
+                  labs(y = "RMSE") + 
+                  labs(title = "RMSE for the different models") + 
+                  facet_grid(.~ longrmsedf$category, scales = "free_x", space = "free")
+
+```
+
+```{r Formatting the Berine data}
+Bernie <- filter(test, SUBJ == 2)
+
+AvgMLUTD <- data %>% 
+  filter(Diagnosis == "TD") %>% 
+  group_by(VISIT) %>% 
+  summarise(
+    meanTD = mean(CHI_MLU)
+  )
+
+AvgMLUTD$BernieMLU <- Bernie$CHI_MLU
+MLUDiff <- AvgMLUTD$BernieMLU-AvgMLUTD$meanTD %>% view()
+
+model <- lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1+VISIT|SUBJ), data = data, REML = FALSE)
+
+AvgMLUTD$predictedBernieValues <- predict(model, Bernie)
+
+LongAvgMLUTD <- melt(AvgMLUTD, id.vars = "VISIT")
+
+LongAvgMLUTD$VISIT <- as.factor(LongAvgMLUTD$VISIT)
+```
+
+```{r Modelling Bernie}
+
+ggplot(LongAvgMLUTD, aes(variable, value, colour = variable, fill = variable)) +
+        geom_bar(stat = 'summary', fun.y = mean, width = 0.2) + 
+        geom_errorbar(stat = 'summary', fun.data = mean_se, width = 0.1, colour = 'black') +
+                  labs(y = "Value") + 
+                  labs(title = "Comparing Bernie MLU") + 
+                  theme(axis.title.x = element_blank(), 
+                        axis.text.x = element_blank(),
+                        axis.ticks.x = element_blank()) + 
+                  facet_grid(.~ LongAvgMLUTD$VISIT, scales = "free_x", space = "free")
+```
+
+
+```{r Comparing AIC and RMSE values for the three models}
+df <- cbind(as.data.frame(AIC(model0)), as.data.frame(AIC(model1)), as.data.frame(AIC(model2))) %>% melt(.)
+            
+an1 <- anova(model0, model1, model2)
+aic <- as.data.frame(an1$AIC)
+
+AIC(model0)
+AIC(model1)
+AIC(model2)
+
+rmse1 <- rmse(data$CHI_MLU, predict(model0))
+rmse2 <-rmse(data$CHI_MLU, predict(model1))
+rmse3 <-rmse(data$CHI_MLU, predict(model2))
+rmse4 <-rmse(test$CHI_MLU, predict(model0))
+rmse5 <-rmse(test$CHI_MLU, predict(model1))
+rmse6 <-rmse(test$CHI_MLU, predict(model2))
+
+aic$RMSEtrain <- c(rmse1, rmse2, rmse3) 
+aic$RMSEtest <- c(rmse4, rmse5, rmse6) 
+
+setnames(aic, "an1$AIC", "AIC")
+
+ggplot(aic, aes(x = AIC)) +  
+ geom_line(aes(y = RMSEtrain), color = "darkred") + 
+ geom_line(aes(y = RMSEtest), color="steelblue", linetype="twodash") + 
+  labs(x="Value of AIC", y= "Value of RMSE") +
+  theme_bw() +  theme(legend.position="bottom") +
+  scale_color_brewer(type = "qual", palette = 2)
+
 ```
 
 
