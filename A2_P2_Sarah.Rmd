@@ -1,7 +1,7 @@
 ---
-title: "Assignment 2 - Language Development in ASD - Making predictions"
-author: "Riccardo Fusaroli"
-date: "August 9, 2019"
+title: "A2_P2_Sarah"
+author: "Sarah Hedvig Dahl Nielsen"
+date: "9/17/2020"
 output: html_document
 ---
 
@@ -47,7 +47,7 @@ How did your models from last time perform? In this exercise you have to compare
 
 ```{r, include = FALSE}
 
-pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret)
+pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret,data.table, merTools)
 
 ## Clean up function, included to inspire you
 
@@ -100,23 +100,51 @@ CleanUpData <- function(Demo,LU,Word){
 
 # Load training Data
 
+training <- read.csv("data_clean.csv")
 
-#- recreate the models you chose last time (just write the code again and apply it to Train Data)
+train_sub <- training %>% 
+  dplyr::select(Child.ID,Visit,Diagnosis,MOT_MLU,CHI_MLU,types_CHI,tokens_CHI,verbalIQ1,nonVerbalIQ1,Socialization)
 
+train_sub <- train_sub[complete.cases(train_sub), ]
+
+
+#- recreate the model you chose last time (just write the code again and apply it to Train Data)
+
+M5_train <- lmer(CHI_MLU ~ Diagnosis * Visit^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + Visit | Child.ID), data = train_sub, REML = FALSE)
 
 
 #- calculate performance of the model on the training data: root mean square error is a good measure. (Tip: google the function rmse())
 
+rmse(train_sub$CHI_MLU, predict(M5_train))
+
+# predict() is the same as fitted()
 
 
 #- create the test dataset (apply the code from assignment 1 or my function to clean up the 3 test datasets)
+
+Demo <- read_csv("demo_test.csv")
+LU <- read_csv("LU_test.csv")
+Word <- read_csv("token_test.csv") 
+
+test <- CleanUpData(Demo,LU,Word)
+
+test_sub <- test %>% dplyr::select(Child.ID,Visit,Diagnosis,MOT_MLU,CHI_MLU,types_CHI,tokens_CHI,verbalIQ1,nonVerbalIQ1,Socialization) #Subsetting the variables our model takes
+test_sub <- test_sub[complete.cases(test_sub), ] #Removing all complete cases in the dataframe 
+
 # Test data
 
+M5_test <- lmer(CHI_MLU ~ Diagnosis * Visit^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + Visit | Child.ID), data = test_sub, REML = FALSE)
+
+
 #- test the performance of the models on the test data (Tips: google the functions "predict()")
+
+rmse(test_sub$CHI_MLU, predict(M5_test))
 
 
 #- optional: predictions are never certain, can you identify the uncertainty of the predictions? (e.g. google predictinterval())
 
+predictInterval(M5_train)
+predictInterval(M5_test)
 ```
 
 [HERE GOES YOUR ANSWER]
@@ -140,11 +168,129 @@ In this exercise you have to use cross-validation to calculate the predictive er
 ```{r}
 #- Create the basic model of ChildMLU as a function of Time and Diagnosis (don't forget the random effects!).
 
+BM_train <- lmer(CHI_MLU ~ Visit*Diagnosis + (1 + Visit | Child.ID), data = train_sub, REML = F)
+
+BM_test <- lmer(CHI_MLU ~ Visit*Diagnosis + (1 + Visit | Child.ID), data = test_sub, REML = F)
+
 #- Make a cross-validated version of the model. (Tips: google the function "createFolds";  loop through each fold, train a model on the other folds and test it on the fold)
+
+k = 6
+folds = createFolds(unique(train_sub$Child.ID), k = k, list = TRUE, returnTrain = FALSE)
+trainRMSE = rep(NA, k)
+testRMSE = rep(NA, k)
+i = 1
+for (fold in folds){
+  train = subset(train_sub, !(Child.ID %in% fold))
+  test = subset(train_sub, Child.ID %in% fold)
+  model = lmer(CHI_MLU~Diagnosis*Visit + (1+Visit|Child.ID), train)
+  test$prediction = predict (model, test, allow.new.levels = TRUE)
+  train$prediction = fitted(model)
+  trainRMSE[i] = rmse (train$CHI_MLU, fitted(model))
+  testRMSE[i] = rmse(test$CHI_MLU, test$prediction)
+  i = i + 1
+}
+trainRMSE_basic <- trainRMSE
+testRMSE_basic <- testRMSE
 
 #- Report the results and comment on them. 
 
 #- Now try to find the best possible predictive model of ChildMLU, that is, the one that produces the best cross-validated results.
+
+k = 6
+folds = createFolds(unique(train_sub$Child.ID), k = k, list = TRUE, returnTrain = FALSE)
+trainRMSE = rep(NA, k)
+testRMSE = rep(NA, k)
+i = 1
+for (fold in folds){
+  train = subset(train_sub, !(Child.ID %in% fold))
+  test = subset(train_sub, Child.ID %in% fold)
+  model = lmer(CHI_MLU~Diagnosis*Visit^2+Socialization+tokens_CHI+types_CHI(1+Visit|Child.ID), train)
+  test$prediction = predict (model, test, allow.new.levels = TRUE)
+  train$prediction = fitted(model)
+  trainRMSE[i] = rmse (train$CHI_MLU, fitted(model))
+  testRMSE[i] = rmse(test$CHI_MLU, test$prediction)
+  i = i + 1
+}
+trainRMSE_M1 <- trainRMSE
+testRMSE_M1 <- testRMSE
+
+
+k = 6
+folds = createFolds(unique(train_sub$Child.ID), k = k, list = TRUE, returnTrain = FALSE)
+trainRMSE = rep(NA, k)
+testRMSE = rep(NA, k)
+i = 1
+for (fold in folds){
+  train = subset(train_sub, !(Child.ID %in% fold))
+  test = subset(train_sub, Child.ID %in% fold)
+  model = lmer(CHI_MLU~Diagnosis*Visit^2+verbalIQ1+(1+Visit|Child.ID), train)
+  test$prediction = predict (model, test, allow.new.levels = TRUE)
+  train$prediction = fitted(model)
+  trainRMSE[i] = rmse (train$CHI_MLU, fitted(model))
+  testRMSE[i] = rmse(test$CHI_MLU, test$prediction)
+  i = i + 1
+}
+trainRMSE_M2 <- trainRMSE
+testRMSE_M2 <- testRMSE
+
+
+k = 6
+folds = createFolds(unique(train_sub$Child.ID), k = k, list = TRUE, returnTrain = FALSE)
+trainRMSE = rep(NA, k)
+testRMSE = rep(NA, k)
+i = 1
+for (fold in folds){
+  train = subset(train_sub, !(Child.ID %in% fold))
+  test = subset(train_sub, Child.ID %in% fold)
+  model = lmer(CHI_MLU~Diagnosis*Visit^2+verbalIQ1+nonVerbalIQ1+(1+Visit|Child.ID), train)
+  test$prediction = predict (model, test, allow.new.levels = TRUE)
+  train$prediction = fitted(model)
+  trainRMSE[i] = rmse (train$CHI_MLU, fitted(model))
+  testRMSE[i] = rmse(test$CHI_MLU, test$prediction)
+  i = i + 1
+}
+trainRMSE_M3 <- trainRMSE
+testRMSE_M3 <- testRMSE
+
+
+k = 6
+folds = createFolds(unique(train_sub$Child.ID), k = k, list = TRUE, returnTrain = FALSE)
+trainRMSE = rep(NA, k)
+testRMSE = rep(NA, k)
+i = 1
+for (fold in folds){
+  train = subset(train_sub, !(Child.ID %in% fold))
+  test = subset(train_sub, Child.ID %in% fold)
+  model = lmer(CHI_MLU~Diagnosis*Visit^2+MOT_MLU+verbalIQ1+nonVerbalIQ1+(1+Visit|Child.ID), train)
+  test$prediction = predict (model, test, allow.new.levels = TRUE)
+  train$prediction = fitted(model)
+  trainRMSE[i] = rmse (train$CHI_MLU, fitted(model))
+  testRMSE[i] = rmse(test$CHI_MLU, test$prediction)
+  i = i + 1
+}
+trainRMSE_M4 <- trainRMSE
+testRMSE_M4 <- testRMSE
+
+
+k = 6
+folds = createFolds(unique(train_sub$Child.ID), k = k, list = TRUE, returnTrain = FALSE)
+trainRMSE = rep(NA, k)
+testRMSE = rep(NA, k)
+i = 1
+for (fold in folds){
+  train = subset(train_sub, !(Child.ID %in% fold))
+  test = subset(train_sub, Child.ID %in% fold)
+  model = lmer(CHI_MLU~Diagnosis*Visit^2+MOT_MLU+Socialization+verbalIQ1+nonVerbalIQ1+(1+Visit|Child.ID), train)
+  test$prediction = predict (model, test, allow.new.levels = TRUE)
+  train$prediction = fitted(model)
+  trainRMSE[i] = rmse (train$CHI_MLU, fitted(model))
+  testRMSE[i] = rmse(test$CHI_MLU, test$prediction)
+  i = i + 1
+}
+trainRMSE_M5 <- trainRMSE
+testRMSE_M5 <- testRMSE
+
+
 
 # Bonus Question 1: What is the effect of changing the number of folds? Can you plot RMSE as a function of number of folds?
 # Bonus Question 2: compare the cross-validated predictive error against the actual predictive error on the test data
@@ -182,4 +328,3 @@ Then try to find the best possible predictive model of ChildMLU, that is, the on
 
 ### OPTIONAL: Exercise 5): Using Lasso for model selection
 Welcome to the last secret exercise. If you have already solved the previous exercises, and still there's not enough for you, you can expand your expertise by learning about penalizations. Check out this tutorial: http://machinelearningmastery.com/penalized-regression-in-r/ and make sure to google what penalization is, with a focus on L1 and L2-norms. Then try them on your data!
-
