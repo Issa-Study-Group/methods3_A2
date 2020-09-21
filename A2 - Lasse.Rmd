@@ -1,0 +1,120 @@
+---
+title: "A2 - Lasse Code"
+author: "Lasse Hansen"
+date: "9/18/2020"
+output: html_document
+---
+
+```{r Loading Data}
+pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret,tidyverse, caret, data.table, merTools)
+```
+
+```{r Making test data}
+## Cleaning up the test data for comparing with out training data 
+
+Demo <- read_csv("demo_test.csv")
+LU <- read_csv("LU_test.csv")
+Word <- read_csv("token_test.csv") 
+
+CleanUpData <- function(Demo,LU,Word){
+  Speech <- merge(LU, Word) %>% 
+    rename(
+      Child.ID = SUBJ, 
+      Visit=VISIT) %>%
+    mutate(
+      Visit = as.numeric(str_extract(Visit, "\\d")),
+      Child.ID = gsub("\\.","", Child.ID)
+      ) %>%
+    dplyr::select(
+      Child.ID, Visit, MOT_MLU, CHI_MLU, types_MOT, types_CHI, tokens_MOT, tokens_CHI
+    )
+  Demo <- Demo %>%
+    dplyr::select(
+      Child.ID, Visit, Ethnicity, Diagnosis, Gender, Age, ADOS, MullenRaw, ExpressiveLangRaw, Socialization
+    ) %>%
+    mutate(
+      Child.ID = gsub("\\.","", Child.ID)
+    )
+  Data=merge(Demo,Speech,all=T)
+  Data1= Data %>% 
+     subset(Visit=="1") %>% 
+     dplyr::select(Child.ID, ADOS, ExpressiveLangRaw, MullenRaw, Socialization) %>%
+     rename(Ados1 = ADOS, 
+            verbalIQ1 = ExpressiveLangRaw, 
+            nonVerbalIQ1 = MullenRaw,
+            Socialization1 = Socialization) 
+  Data=merge(Data, Data1, all=T) %>%
+    mutate(
+      Child.ID = as.numeric(as.factor(as.character(Child.ID))),
+      Visit = as.numeric(as.character(Visit)),
+      Gender = recode(Gender, 
+         "1" = "M",
+         "2" = "F"),
+      Diagnosis = recode(Diagnosis,
+         "A"  = "ASD",
+         "B"  = "TD")
+    )
+  return(Data)
+}
+
+test <- CleanUpData(Demo, LU, Word)
+
+test <- test %>% rename(SUBJ = Child.ID, VISIT = Visit)
+```
+
+```{r Loading train data}
+data <- read_csv("data_clean.csv")
+data <- data %>% rename(SUBJ = Child.ID, VISIT = Visit)
+```
+
+```{r Removing complete cases}
+data <- data %>% select("SUBJ", "VISIT", "Diagnosis", "tokens_CHI", "types_CHI", "MOT_MLU", "CHI_MLU", "verbalIQ1", "nonVerbalIQ1", "Socialization1") #Subsetting the variables our model takes
+
+data <- data[complete.cases(data), ]
+```
+
+```{r}
+model = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = train, REML = FALSE)
+
+pi <- predictInterval(model, test)
+
+ggplot(pi, aes(x = 1:57)) +  
+ geom_line(aes(y = fit), color = "darkred") + 
+ geom_line(aes(y = lwr), color="steelblue", linetype="twodash") + 
+ geom_line(aes(y = upr), color = "cornflowerblue") +
+  labs(x="Index", y="Prediction w/ 95% PI") +
+  theme_bw() +  theme(legend.position="bottom") +
+  scale_color_brewer(type = "qual", palette = 2)
+```
+
+```{r}
+k = 6
+folds = createFolds(unique(data$SUBJ), k = k, list = TRUE, returnTrain = FALSE)
+trainRMSE = rep(NA, k)
+testRMSE = rep(NA, k)
+i = 1
+
+for (fold in folds){
+  train = subset(data, !(SUBJ  %in% fold)) 
+  test = subset(data, SUBJ %in% fold)
+  model0 = lmer(CHI_MLU~Diagnosis * VISIT^2 + (1 + VISIT | SUBJ), train)
+  model1 = lmer(CHI_MLU~Diagnosis * VISIT^2 + verbalIQ1 + nonVerbalIQ1+(1+VISIT|SUBJ), train)
+  model2 = lmer(CHI_MLU~Diagnosis * VISIT^2+ tokens_CHI + types_CHI + MOT_MLU + (1+VISIT|SUBJ), train)
+  test$prediction0 = predict (model0, test, allow.new.levels = TRUE)
+  train$prediction0 = fitted(model0)
+  test$prediction1 = predict (model1, test, allow.new.levels = TRUE)
+  train$prediction1 = fitted(model1)
+  test$prediction2 = predict (model2, test, allow.new.levels = TRUE)
+  train$prediction2 = fitted(model2)
+  trainRMSE[i] = rmse (train$CHI_MLU, fitted(model0))
+  testRMSE[i] = rmse(test$CHI_MLU, test$prediction0)
+  trainRMSE1[i] = rmse (train$CHI_MLU, fitted(model1))
+  testRMSE1[i] = rmse(test$CHI_MLU, test$prediction1)
+  trainRMSE2[i] = rmse (train$CHI_MLU, fitted(model2))
+  testRMSE2[i] = rmse(test$CHI_MLU, test$prediction2)
+  i = i + 1
+}
+```
+
+
+
