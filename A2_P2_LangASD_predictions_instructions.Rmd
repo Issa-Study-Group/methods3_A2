@@ -47,12 +47,15 @@ How did your models from last time perform? In this exercise you have to compare
 
 ```{r, include = FALSE}
 
-pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret)
+pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret,tidyverse, caret, data.table, merTools)
 
-## Clean up function, included to inspire you
+## Cleaning up the test data for comparing with out training data 
+
+Demo <- read_csv("demo_test.csv")
+LU <- read_csv("LU_test.csv")
+Word <- read_csv("token_test.csv") 
 
 CleanUpData <- function(Demo,LU,Word){
-  
   Speech <- merge(LU, Word) %>% 
     rename(
       Child.ID = SUBJ, 
@@ -64,7 +67,6 @@ CleanUpData <- function(Demo,LU,Word){
     dplyr::select(
       Child.ID, Visit, MOT_MLU, CHI_MLU, types_MOT, types_CHI, tokens_MOT, tokens_CHI
     )
-  
   Demo <- Demo %>%
     dplyr::select(
       Child.ID, Visit, Ethnicity, Diagnosis, Gender, Age, ADOS, MullenRaw, ExpressiveLangRaw, Socialization
@@ -72,9 +74,7 @@ CleanUpData <- function(Demo,LU,Word){
     mutate(
       Child.ID = gsub("\\.","", Child.ID)
     )
-    
   Data=merge(Demo,Speech,all=T)
-  
   Data1= Data %>% 
      subset(Visit=="1") %>% 
      dplyr::select(Child.ID, ADOS, ExpressiveLangRaw, MullenRaw, Socialization) %>%
@@ -82,7 +82,6 @@ CleanUpData <- function(Demo,LU,Word){
             verbalIQ1 = ExpressiveLangRaw, 
             nonVerbalIQ1 = MullenRaw,
             Socialization1 = Socialization) 
-  
   Data=merge(Data, Data1, all=T) %>%
     mutate(
       Child.ID = as.numeric(as.factor(as.character(Child.ID))),
@@ -94,14 +93,56 @@ CleanUpData <- function(Demo,LU,Word){
          "A"  = "ASD",
          "B"  = "TD")
     )
-
   return(Data)
 }
 
+test <- CleanUpData(Demo, LU, Word)
+
 # Load training Data
+
+data <- read_csv("data_clean.csv")
+data <- data %>% rename(SUBJ = Child.ID, VISIT = Visit)
+test <- test %>% rename(SUBJ = Child.ID, VISIT = Visit)
+data$X1 <- NULL
 
 
 #- recreate the models you chose last time (just write the code again and apply it to Train Data)
+
+data <- data %>% select("SUBJ", "VISIT", "Diagnosis", "tokens_CHI", "types_CHI", "MOT_MLU", "CHI_MLU", "verbalIQ1", "nonVerbalIQ1", "Socialization1") #Subsetting the variables our model takes
+
+data$verbalIQ1
+
+data <- data[complete.cases(data), ] #Removing all complete cases in the dataframe 
+
+k = 6
+folds = createFolds(unique(data$SUBJ), k = k, list = TRUE, returnTrain = FALSE)
+
+trainRMSE = rep(NA, k)
+               
+testRMSE = rep(NA, k)
+
+i = 1
+
+
+
+for (fold in folds){
+  train = subset(data, !(SUBJ  %in% fold)) 
+  test = subset(data, SUBJ %in% fold)
+  model = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = train, REML = FALSE)
+  test$prediction = predict(model, test, allow.new.levels = TRUE)
+  train$prediction = fitted(model)
+  trainRMSE[i] = rmse (train$CHI_MLU, fitted(model))
+  testRMSE[i] = rmse (test$CHI_MLU, test$prediction)
+  i = i + 1
+}
+
+df <- data.frame(testRMSE, trainRMSE)
+
+anova_one_way <- aov(trainRMSE ~ testRMSE, data = df)
+summary(anova_one_way)
+
+
+model = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = train, REML = FALSE)
 
 
 #- calculate performance of the model on the training data: root mean square error is a good measure. (Tip: google the function rmse())
@@ -114,13 +155,139 @@ CleanUpData <- function(Demo,LU,Word){
 #- test the performance of the models on the test data (Tips: google the functions "predict()")
 
 
-#- optional: predictions are never certain, can you identify the uncertainty of the predictions? (e.g. google predictinterval())
+pi <- rbind(data.frame(Predict.Method="predictInterval()", x=(1:nrow(pi))-0.1, pi),
+                   data.frame(Predict.Method="lme4::bootMer() - Method 2", x=(1:nrow(pi))+0.1, pi))
+
+#- optional: predictions are never certain, can you identify the uncertainty of the predictions? (e.g. google 
+
+pi <- predictInterval(model, test)
+
+model = lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = train, REML = FALSE)
+
+ggplot(pi, aes(x = 1:57)) +  
+ geom_line(aes(y = fit), color = "darkred") + 
+ geom_line(aes(y = lwr), color="steelblue", linetype="twodash") + 
+ geom_line(aes(y = upr), color = "cornflowerblue") +
+  labs(x="Index", y="Prediction w/ 95% PI") +
+  theme_bw() +  theme(legend.position="bottom") +
+  scale_color_brewer(type = "qual", palette = 2)
+
+
+   
+   geom_line(aes(y = lwr), color="steelblue", linetype="twodash")
+
+, y=fit, ymin=lwr, ymax=upr, ), data = pi) +
+  geom_point() +
+  geom_linerange() +
+  labs(x="Index", y="Prediction w/ 95% PI") +
+  theme_bw() +  theme(legend.position="bottom") +
+  scale_color_brewer(type = "qual", palette = 2)
 
 ```
+
+```{r}
+pi1 <- predictInterval(model, data)
+
+pi1 <- rbind(data.frame(Predict.Method = "predictInterval()", x=(1:nrow(pi1))-0.1, pi1),
+                   data.frame(Predict.Method="lme4::bootMer() - Method 2", x=(1:nrow(pi.boot2))+0.1, pi.boot2))
+
+ggplot(pi1, aes(x = 1:57)) +  
+ geom_line(aes(y = fit), color = "darkred") + 
+ geom_line(aes(y = lwr), color="steelblue", linetype="twodash") + 
+ geom_line(aes(y = upr), color = "cornflowerblue") +
+  geom_point() +
+  geom_linerange() +
+  labs(x="Index", y="Prediction w/ 95% PI") +
+  theme_bw() +  theme(legend.position="bottom") +
+  scale_color_brewer(type = "qual", palette = 2)
+
+```
+
+
+
+```{r}
+m1 <- predict(model, data, allow.new.levels = TRUE)
+m2 <- predict(model, test, allow.new.levels = TRUE)
+
+comp <- data_frame(m1, m2)
+
+?data_frame()
+
+ggplot(pi, aes(x = 1:57)) +  
+ geom_line(aes(y = fit), color = "darkred") + 
+ geom_line(aes(y = lwr), color="steelblue", linetype="twodash") + 
+ geom_line(aes(y = upr), color = "cornflowerblue") +
+  geom_point() +
+  geom_linerange() +
+  labs(x="Index", y="Prediction w/ 95% PI") +
+  theme_bw() +  theme(legend.position="bottom") +
+  scale_color_brewer(type = "qual", palette = 2)
+
+```
+
 
 [HERE GOES YOUR ANSWER]
 
 ### Exercise 2) Model Selection via Cross-validation (N.B: ChildMLU!)
+
+
+```{r}
+k = 6
+folds = createFolds(unique(data$SUBJ), k = k, list = TRUE, returnTrain = FALSE)
+
+train1RMSE = rep(NA, k)
+               
+test1RMSE = rep(NA, k)
+
+i = 1
+
+for (fold in folds){
+  train1 = subset(data, !(SUBJ  %in% fold)) 
+  test1 = subset(data, SUBJ %in% fold)
+  model = lmer(CHI_MLU ~ Diagnosis * VISIT + (1 + VISIT | SUBJ), data = train1, REML = FALSE)
+  test1$prediction = predict(model, test1, allow.new.levels = TRUE)
+  train1$prediction = fitted(model)
+  train1RMSE[i] = rmse (train1$CHI_MLU, fitted(model))
+  test1RMSE[i] = rmse (test1$CHI_MLU, test1$prediction)
+  i = i + 1
+}
+
+train1RMSE
+test1RMSE
+```
+
+
+```{r}
+k = 6
+folds = createFolds(unique(data$SUBJ), k = k, list = TRUE, returnTrain = FALSE)
+trainRMSE = rep(NA, k)
+testRMSE = rep(NA, k)
+i = 1
+
+for (fold in folds){
+  train = subset(data, !(SUBJ  %in% fold)) 
+  test = subset(data, SUBJ %in% fold)
+  model0 = lmer(CHI_MLU~Diagnosis * VISIT^2 + (1 + VISIT | SUBJ), train)
+  model1 = lmer(CHI_MLU~Diagnosis * VISIT^2 + verbalIQ1 + nonVerbalIQ1+(1+VISIT|SUBJ), train)
+  model2 = lmer(CHI_MLU~Diagnosis * VISIT^2+ tokens_CHI + types_CHI + MOT_MLU + (1+VISIT|SUBJ), train)
+  test$prediction0 = predict (model0, test, allow.new.levels = TRUE)
+  train$prediction0 = fitted(model0)
+  test$prediction1 = predict (model1, test, allow.new.levels = TRUE)
+  train$prediction1 = fitted(model1)
+  test$prediction2 = predict (model2, test, allow.new.levels = TRUE)
+  train$prediction2 = fitted(model2)
+  trainRMSE[i] = rmse (train$CHI_MLU, fitted(model0))
+  testRMSE[i] = rmse(test$CHI_MLU, test$prediction0)
+  trainRMSE1[i] = rmse (train$CHI_MLU, fitted(model1))
+  testRMSE1[i] = rmse(test$CHI_MLU, test$prediction1)
+  trainRMSE2[i] = rmse (train$CHI_MLU, fitted(model2))
+  testRMSE2[i] = rmse(test$CHI_MLU, test$prediction2)
+  i = i + 1
+}
+trainRMSE_M3 <- trainRMSE
+testRMSE_M3 <- testRMSE
+```
+
 
 One way to reduce bad surprises when testing a model on new data is to train the model via cross-validation. 
 
@@ -134,6 +301,7 @@ In this exercise you have to use cross-validation to calculate the predictive er
 
 - Bonus Question 1: What is the effect of changing the number of folds? Can you plot RMSE as a function of number of folds?
 - Bonus Question 2: compare the cross-validated predictive error against the actual predictive error on the test data
+
 
 
 ```{r}
