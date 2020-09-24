@@ -71,6 +71,13 @@ data <- data %>% rename(SUBJ = Child.ID, VISIT = Visit)
 ```{r Removing complete cases}
 data <- data %>% dplyr::select("SUBJ", "VISIT", "Diagnosis", "tokens_CHI", "types_CHI", "MOT_MLU", "CHI_MLU", "verbalIQ1", "nonVerbalIQ1", "Socialization1") #Subsetting the variables our model takes
 
+test$SUBJ <- ifelse(test$SUBJ == "1", "67",
+             ifelse(test$SUBJ == "2", "68",
+             ifelse(test$SUBJ == "3", "69",
+             ifelse(test$SUBJ == "4", "70",
+             ifelse(test$SUBJ == "5", "71",
+             ifelse(test$SUBJ == "6", "72", test$SUBJ))))))
+
 data <- data[complete.cases(data), ] #Removing complete cases
 ```
 
@@ -90,10 +97,6 @@ rmse(test$CHI_MLU, predict(model_test))
 pi_0 <- predictInterval(model, data)
 
 pi <- predictInterval(model_test, test)
-
-
-
-
 
 ggplot(pi, aes(x = 1:36)) +  
  geom_line(aes(y = fit), color = "darkred") + 
