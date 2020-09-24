@@ -1,0 +1,131 @@
+---
+title: "A2 - Part 3, Study Group 7"
+author: "Kristian Severin, Lasse Hansen, Nikolaj Munch & Sarah Nielsen"
+date: "9/24/2020"
+output: html_document
+---
+
+```{r}
+pacman::p_load(readr,dplyr,stringr,lmerTest,Metrics,caret,tidyverse, caret, data.table, merTools, reshape2, simr, lmerTest, pwr)
+
+```
+
+```{r Making test data}
+## Cleaning up the test data for comparing with out training data 
+
+Demo <- read_csv("demo_test.csv")
+LU <- read_csv("LU_test.csv")
+Word <- read_csv("token_test.csv") 
+
+CleanUpData <- function(Demo,LU,Word){
+  Speech <- merge(LU, Word) %>% 
+    rename(
+      Child.ID = SUBJ, 
+      Visit=VISIT) %>%
+    mutate(
+      Visit = as.numeric(str_extract(Visit, "\\d")),
+      Child.ID = gsub("\\.","", Child.ID)
+      ) %>%
+    dplyr::select(
+      Child.ID, Visit, MOT_MLU, CHI_MLU, types_MOT, types_CHI, tokens_MOT, tokens_CHI
+    )
+  Demo <- Demo %>%
+    dplyr::select(
+      Child.ID, Visit, Ethnicity, Diagnosis, Gender, Age, ADOS, MullenRaw, ExpressiveLangRaw, Socialization
+    ) %>%
+    mutate(
+      Child.ID = gsub("\\.","", Child.ID)
+    )
+  Data=merge(Demo,Speech,all=T)
+  Data1= Data %>% 
+     subset(Visit=="1") %>% 
+     dplyr::select(Child.ID, ADOS, ExpressiveLangRaw, MullenRaw, Socialization) %>%
+     rename(Ados1 = ADOS, 
+            verbalIQ1 = ExpressiveLangRaw, 
+            nonVerbalIQ1 = MullenRaw,
+            Socialization1 = Socialization) 
+  Data=merge(Data, Data1, all=T) %>%
+    mutate(
+      Child.ID = as.numeric(as.factor(as.character(Child.ID))),
+      Visit = as.numeric(as.character(Visit)),
+      Gender = recode(Gender, 
+         "1" = "M",
+         "2" = "F"),
+      Diagnosis = recode(Diagnosis,
+         "A"  = "ASD",
+         "B"  = "TD")
+    )
+  return(Data)
+}
+
+test <- CleanUpData(Demo, LU, Word)
+test <- test %>% rename(SUBJ = Child.ID, VISIT = Visit)
+test <- test %>% dplyr::select("SUBJ", "VISIT", "Diagnosis", "tokens_CHI", "types_CHI", "MOT_MLU", "CHI_MLU", "verbalIQ1", "nonVerbalIQ1", "Socialization1")
+test <- test[complete.cases(test), ]
+
+test$SUBJ <- ifelse(test$SUBJ == "1", "67",
+             ifelse(test$SUBJ == "2", "68",
+             ifelse(test$SUBJ == "3", "69",
+             ifelse(test$SUBJ == "4", "70",
+             ifelse(test$SUBJ == "5", "71",
+             ifelse(test$SUBJ == "6", "72", test$SUBJ))))))
+```
+
+```{r Loading train data}
+data <- read_csv("data_clean.csv")
+data <- data %>% rename(SUBJ = Child.ID, VISIT = Visit)
+data <- data %>% dplyr::select("SUBJ", "VISIT", "Diagnosis", "tokens_CHI", "types_CHI", "MOT_MLU", "CHI_MLU", "verbalIQ1", "nonVerbalIQ1", "Socialization1")
+data <- data[complete.cases(data), ]
+```
+
+```{r Merging train and test data}
+df <- rbind(data, test) 
+```
+
+```{r Making Subject ID's numbers from 1:67}
+df$SUBJ <- as.factor(df$SUBJ)
+df$SUBJ <- as.numeric(df$SUBJ)
+```
+
+```{r Creatting first model}
+model = lmerTest::lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = df, REML = FALSE)
+```
+
+```{r}
+#Estimating effect size
+powerV = powerSim(model,fixed("DiagnosisTD:VISIT", method = "t"), nsim=50)
+powerD = powerSim(model,fixed("MOT_MLU"), method = "t", nsim=50)
+
+# minimum effect size (as our coefficient was set to)
+fixef(model)["DiagnosisTD:VISIT"] <- 1.315e-01
+
+#Making a power curve
+powerCurveV = powerCurve(model, fixed("DiagnosisTD:VISIT", method = "t"), along = "SUBJ", nsim = 200)
+plot(powerCurveV)
+```
+
+```{r Model 2}
+model1 = lmerTest::lmer(CHI_MLU ~ Diagnosis * VISIT^2 + tokens_CHI + types_CHI + MOT_MLU + (1 + VISIT | SUBJ), data = df, REML = FALSE)
+
+fixef(model1)["DiagnosisTD:VISIT"] <- 0.05
+```
+
+```{r Calculating the power curve with 120 for an effect of 0.05}
+model2 <- extend(model1, along = "SUBJ", n = 120)
+powerCurveV2 = powerCurve(model2, fixed("DiagnosisTD:VISIT", method = "t"), along = "SUBJ", nsim = 50)
+plot(powerCurveV2)
+```
+
+```{r Calculating the power curve with 30 subject with an effect of 0.13}
+model3 <- extend(model, along = "SUBJ", n = 30)
+powerCurveV3 = powerCurve(model3, fixed("DiagnosisTD:VISIT", method = "t"), along = "SUBJ", nsim = 50)
+plot(powerCurveV3)
+```
+
+```{r Calculating the power curve with 30 for an effect of 0.05}
+model4 <- extend(model1, along = "SUBJ", n = 30)
+powerCurveV4 = powerCurve(model4, fixed("DiagnosisTD:VISIT", method = "t"), along = "SUBJ", nsim = 50)
+plot(powerCurveV4)
+```
+
+
